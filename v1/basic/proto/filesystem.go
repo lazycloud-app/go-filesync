@@ -3,39 +3,54 @@ package proto
 import "time"
 
 type (
-	Filesystem struct {
-		Folders []Folder
-		Files   []File
+	FSEventType  int
+	FSObjectType int
+
+	FSEvent struct {
+		Action FSEventType
+		Object FSObject
 	}
 
-	// File represents file data into DB
-	File struct {
-		ID            uint `gorm:"primaryKey"`
-		Hash          string
-		Name          string `gorm:"uniqueIndex:file"`
-		Path          string `gorm:"uniqueIndex:file"`
-		Owner         uint
-		Size          int64
-		FSUpdatedAt   time.Time
-		CreatedAt     time.Time
-		UpdatedAt     time.Time
-		CurrentStatus string
-		LocationDirId int
-		Type          string
-	}
-
-	// Folder represents folder data to exchange current sync status information
-	Folder struct {
-		ID            uint   `gorm:"primaryKey"`
-		Name          string `gorm:"uniqueIndex:folder"`
-		Path          string `gorm:"uniqueIndex:folder"`
-		Owner         uint
-		FSUpdatedAt   time.Time
-		CreatedAt     time.Time
-		UpdatedAt     time.Time
-		CurrentStatus string
-		LocationDirId int
-		Items         int
-		Size          int64
+	FSObject struct {
+		ObjectType FSObjectType
+		FullPath   string
+		Hash       string
+		Ext        string
+		Size       int64
+		UpdatedAt  time.Time
 	}
 )
+
+const (
+	//NO_ACTION represents an empty value. For example, when there is no need for other party to know about event
+	FS_NO_ACTION FSEventType = iota
+	//FS_CREATED means that some object was created in the filesystem
+	FS_CREATED
+	//FS_DELETED means that some object was deleted from the filesystem.
+	//v1 of the protocol does not define deletion type ('to trash', etc.)
+	FS_DELETED
+	//FS_UPDATED represents any possible update to any object in the filesystem.
+	//v1 of the protocol has no clarifying statements about exact update parameters
+	FS_UPDATED
+	//FS_RENAMED means that some object was renamed
+	//(and also can be processed like deleted->created series of actions by some clients)
+	FS_RENAMED
+	//FS_UNKNOWN_ACTION represents action that is beyond this protocol version
+	FS_UNKNOWN_ACTION
+	//FS_ANY_ACTION represents state when any action needs same response or processing
+	FS_ANY_ACTION
+)
+
+func (t FSEventType) String() string {
+	return [...]string{"NO_ACTION", "CREATED", "DELETED", "UPDATED", "RENAMED", "UNKNOWN", "ANY"}[t]
+}
+
+const (
+	OBJ_UNKNOWN FSObjectType = iota
+	OBJ_FILE
+	OBJ_DIR
+)
+
+func (t FSObjectType) String() string {
+	return [...]string{"Unknown filesystem objet type", "FILE", "DIR"}[t]
+}

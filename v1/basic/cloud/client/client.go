@@ -11,21 +11,17 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/lazybark/go-helpers/hasher"
 	"github.com/lazybark/go-pretty-code/logs"
-	"github.com/lazycloud-app/go-filesync/v1/basic/cloud"
-	"github.com/lazycloud-app/go-filesync/v1/basic/cloud/events"
-	"github.com/lazycloud-app/go-filesync/v1/basic/fsworker"
+	"github.com/lazycloud-app/go-filesync/helpers"
+	"github.com/lazycloud-app/go-filesync/v1/basic/fs"
 	"github.com/lazycloud-app/go-filesync/v1/basic/messenger"
 	"github.com/lazycloud-app/go-filesync/v1/basic/proto"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 // NewSyncServer creates a sync server instance
@@ -49,43 +45,50 @@ func (c *Client) Start() {
 		log.Fatal("Error getting config: ", err)
 	}
 
-	// Catch events
-	c.evProc = events.NewStandartLogsProcessor(filepath.Join(c.Config.LogDirMain, c.LogfileName()), true)
-
 	c.Logger, err = logs.Double(filepath.Join(c.Config.LogDirMain, c.LogfileName()), false, zap.InfoLevel)
 	if err != nil {
 		log.Fatal("Error getting logger: ", err)
 	}
-	c.evProc.Send(EventType("cyan"), events.SourceSyncServer.String(), fmt.Sprintf("App Version: %s", c.AppVersion))
+	c.Logger.Info(fmt.Sprintf("App Version: %s", c.AppVersion))
 
 	// Connect DB
-	c.DB, err = cloud.OpenSQLite(c.Config.SQLiteDBName)
+	c.DB, err = helpers.OpenSQLite(c.Config.SQLiteDBName)
 	if err != nil {
-		c.evProc.Send(EventType("fatal"), events.SourceSyncServer.String(), fmt.Errorf("db add failed: %w", err))
+		c.Logger.Fatal(fmt.Errorf("db add failed: %w", err))
 	}
 
 	// Connect FS watcher
-	c.Watcher, err = fsnotify.NewWatcher()
+	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		c.evProc.Send(EventType("fatal"), events.SourceSyncServer.String(), fmt.Errorf("new watcher failed: %w", err))
+		c.Logger.Fatal(fmt.Errorf("new watcher failed: %w", err))
 	}
 
 	// Force rescan filesystem and flush old DB-records
 	c.InitDB()
 	if err != nil {
-		c.evProc.Send(EventType("fatal"), events.SourceSyncServer.String(), fmt.Errorf("error flushing DB: %w", err))
+		c.Logger.Fatal(fmt.Errorf("error flushing DB: %w", err))
 	}
 
+	c.syncEventsChan = make(chan fs.EventArray)
+	c.syncErrChan = make(chan error)
+	c.EventsChannel = make(chan proto.FSEvent)
+
+	go c.NotificationPublisher()
+	c.fp = fs.NewProcessor(c.Config.FileSystemRootPath, watcher, c.DB)
+	go c.fp.FilesystemWatcherRoutine(c.syncEventsChan, c.syncErrChan)
+
+	c.processRoot()
+
 	// New filesystem worker
-	c.FW = fsworker.NewWorker(c.Config.FileSystemRootPath, c.DB, c.Watcher)
+	//c.FW = fs.NewProcessor(c.Config.FileSystemRootPath, watcher, c.DB)
 
 	// Watch root dir
-	c.evProc.SendVerbose(EventType("green"), events.SourceSyncServer.String(), "Starting watcher")
-	go c.FilesystemWatcherRoutine()
+	c.Logger.InfoGreen("Starting watcher")
+	//go c.FilesystemWatcherRoutine()
 
 	// Process and watch all subdirs
-	rpStart := time.Now()
-	files, dirs, err, errs := c.FW.ProcessDirectory(c.Config.FileSystemRootPath)
+	//rpStart := time.Now()
+	/*files, dirs, err, errs := c.FW.ProcessDirectory(c.Config.FileSystemRootPath)
 	if err != nil {
 		c.Logger.Fatal("Error processing FS: ", err)
 	}
@@ -95,9 +98,9 @@ func (c *Client) Start() {
 			text += e.Error() + "\n"
 		}
 		c.Logger.Warn("Errors in processing filesystem: \n" + text)
-	}
-	c.Logger.InfoGreen("Root directory processed. Total time: ", time.Since(c.TimeStart))
-	c.Logger.InfoGreen(fmt.Sprintf("Root directory processed. Total %d files in %d directories. Time: %v", files, dirs, time.Since(rpStart)))
+	}*/
+	//c.Logger.InfoGreen("Root directory processed. Total time: ", time.Since(c.TimeStart))
+	//c.Logger.InfoGreen(fmt.Sprintf("Root directory processed. Total %d files in %d directories. Time: %v", files, dirs, time.Since(rpStart)))
 
 	c.Logger.InfoGreen("Starting client")
 
@@ -143,6 +146,7 @@ func (c *Client) LoadConfig(path string) (err error) {
 	return
 }
 
+/*
 // FilesystemWatcherRoutine tracks changes in every folder in root dir
 func (c *Client) FilesystemWatcherRoutine() {
 	done := make(chan bool)
@@ -151,7 +155,7 @@ func (c *Client) FilesystemWatcherRoutine() {
 
 		for {
 			select {
-			case event, ok := <-c.Watcher.Events:
+			case event, ok := <-c.FW.Watcher.Events:
 				if !ok {
 					return
 				}
@@ -187,116 +191,7 @@ func (c *Client) FilesystemWatcherRoutine() {
 				// If file hashing still produces errors (target busy) - increase pause time
 				time.Sleep(100 * time.Millisecond)
 
-				if event.Op.String() == "CREATE" {
-					dat, err := os.Stat(event.Name)
-					if err != nil {
-						c.Logger.Error("Object reading failed: ", err)
-						break
-					}
-					if dat.IsDir() {
-						// Watch new dir
-						err := c.Watcher.Add(event.Name)
-						if err != nil {
-							c.Logger.Error("FS watcher add failed:", err)
-						}
-						c.Logger.Info(fmt.Sprintf("%s added to watcher", event.Name))
-
-						// Scan dir
-						_, _, err, errs := c.FW.ProcessDirectory(event.Name)
-						if err != nil {
-							c.Logger.Error(fmt.Sprintf("Error processing %s: ", event.Name), err)
-						}
-						if len(errs) > 0 {
-							for _, v := range errs {
-								fmt.Println(v)
-							}
-						}
-					}
-					// Add object to DB
-					err = c.FW.MakeDBRecord(dat, event.Name)
-					if err != nil && err.Error() != "UNIQUE constraint failed: sync_files.name, sync_files.path" {
-						c.Logger.Error(fmt.Sprintf("Error making record for %s: ", event.Name), err)
-					}
-				} else if event.Op.String() == "WRITE" {
-					dir, child := filepath.Split(event.Name)
-					dir = strings.TrimSuffix(dir, string(filepath.Separator))
-					dat, err := os.Stat(event.Name)
-					if err != nil {
-						c.Logger.Error("Object reading failed: ", event.Op.String(), err)
-						break
-					}
-					if dat.IsDir() {
-						var folder proto.Folder
-
-						if err := c.DB.Where("name = ? and path = ?", child, c.FW.EscapeAddress(dir)).First(&folder).Error; err != nil {
-							c.Logger.Error("File reading failed: ", err)
-						} else {
-							// Update data in DB
-							folder.FSUpdatedAt = dat.ModTime()
-							if err := c.DB.Table("folders").Save(&folder).Error; err != nil && err != gorm.ErrEmptySlice {
-								c.Logger.Error("Dir saving failed: ", err)
-							}
-						}
-					} else {
-						var file proto.File
-						if err := c.DB.Where("name = ? and path = ?", child, c.FW.EscapeAddress(dir)).First(&file).Error; err != nil {
-							c.Logger.Error("File reading failed: ", err)
-						} else {
-							// Update data in DB
-							hash := ""
-							hash, err := hasher.HashFilePath(event.Name, hasher.SHA256, 8192)
-							if err != nil {
-								c.Logger.Error("3", err)
-							}
-							file.FSUpdatedAt = dat.ModTime()
-							file.Size = dat.Size()
-							file.Hash = hash
-							if err := c.DB.Table("files").Save(&file).Error; err != nil && err != gorm.ErrEmptySlice {
-								c.Logger.Error("Dir saving failed: ", err)
-							}
-						}
-					}
-				} else if event.Op.String() == "REMOVE" || event.Op.String() == "RENAME" { //no difference for DB between deletion and renaming
-					var file proto.File
-					var folder proto.Folder
-
-					dir, child := filepath.Split(event.Name)
-					dir = strings.TrimSuffix(dir, string(filepath.Separator))
-
-					err := c.DB.Where("name = ? and path = ?", child, c.FW.EscapeAddress(dir)).First(&file).Error
-					if err != nil && err != gorm.ErrRecordNotFound {
-						c.Logger.Error(err)
-					}
-					// ID becomes real if object found in DB
-					if file.ID > 0 {
-						err = c.DB.Delete(&file).Error
-						if err != nil {
-							c.Logger.Error(err)
-						}
-						break
-					}
-
-					err = c.DB.Where("name = ? and path = ?", child, c.FW.EscapeAddress(dir)).First(&folder).Error
-					if err != nil && err != gorm.ErrRecordNotFound {
-						c.Logger.Error(err)
-					}
-					// ID becomes real if object found in DB
-					if folder.ID > 0 {
-						err = c.DB.Delete(&folder).Error
-						if err != nil {
-							c.Logger.Error(err)
-						}
-						// Manually delete all files connected to this dir
-						err = c.DB.Where("path = ?", c.FW.EscapeAddress(event.Name)).Delete(&file).Error
-						if err != nil {
-							c.Logger.Error(err)
-						}
-
-						break
-					}
-				}
-
-			case err, ok := <-c.Watcher.Errors:
+			case err, ok := <-c.FW.Watcher.Errors:
 				if !ok {
 					return
 				}
@@ -305,40 +200,26 @@ func (c *Client) FilesystemWatcherRoutine() {
 		}
 	}()
 
-	err := c.Watcher.Add(c.Config.FileSystemRootPath)
+	err := c.FW.Watcher.Add(c.Config.FileSystemRootPath)
 	if err != nil {
 		c.Logger.Fatal("FS watcher add failed: ", err)
 	}
 	c.Logger.Info(fmt.Sprintf("%s added to watcher", c.Config.FileSystemRootPath))
 	<-done
-}
+}*/
 
-func (c *Client) GetFile(fileToGet *proto.GetFile) {
+func (c *Client) GetFile(fileToGet *proto.GetFile, conn *tls.Conn, m *messenger.Messenger) {
 	c.wg.Add(1)
 	defer c.wg.Done()
-	conn, err := c.InitTLSConnection()
-	if err != nil {
-		c.Logger.FatalBackRed("[GetFile] can not init connection -> %w", err)
-	}
-	defer conn.Close()
-
-	m := messenger.New()
-	m.SetToken(c.CurrentToken)
 	rec := m.Recieved()
 
-	err = c.Auth(conn)
-	if err != nil {
-		c.Logger.Error("[GetFile] auth error -> ", err)
-		return
-	}
-
 	// Telling that we want to get the file
-	err = m.Send(fileToGet, proto.MessageGetFile, conn)
+	err := m.SendMessage(fileToGet, proto.MessageGetFile, conn)
 	if err != nil {
 		c.Logger.Error("[GetFile] sending file request error -> ", err)
 		return
 	}
-	c.Stat.BytesSent += m.SentBytes()
+	c.Stat.BytesSent += m.SBytes()
 
 	// Await answer with file
 	for {
@@ -369,7 +250,7 @@ func (c *Client) GetFile(fileToGet *proto.GetFile) {
 				continue
 			}
 
-			*fullPath = c.FW.UnEscapeAddress(filepath.Join(file.Path, file.Name))
+			*fullPath = c.fp.UnEscapeAddress(filepath.Join(file.Path, file.Name))
 			updatedAt = &file.FSUpdatedAt
 			var lastByte int
 
@@ -437,14 +318,23 @@ func (c *Client) GetFile(fileToGet *proto.GetFile) {
 						c.Logger.Error("moving failed: ", *fullPath, err)
 					}
 
-					dat, err := os.Stat(*fullPath)
+					_, err = os.Stat(*fullPath)
 					if err != nil {
 						c.Logger.Error("Object reading failed: ", *fullPath, err)
 						continue
 					}
 
+					file := fs.File{
+						Hash:        fileToGet.Hash,
+						Name:        fileToGet.Name,
+						Path:        fileToGet.Path,
+						Size:        int64(lastByte),
+						Ext:         filepath.Ext(fileToGet.Name),
+						FSUpdatedAt: fileToGet.UpdatedAt,
+					}
+
 					// Add object to DB
-					err = c.FW.MakeDBRecord(dat, *fullPath)
+					err = c.fp.RecordFile(file)
 					if err != nil && err.Error() != "UNIQUE constraint failed: files.name, files.path" {
 						c.Logger.Error(fmt.Sprintf("Error making record for %s: ", *fullPath), err)
 					}
@@ -461,4 +351,46 @@ func (c *Client) GetFile(fileToGet *proto.GetFile) {
 			return
 		}
 	}
+}
+
+func (c *Client) NotificationPublisher() {
+	for {
+		select {
+		case e := <-c.syncEventsChan:
+			//If conversion result says that this action type is not for exchanging with other parties - just skip
+			//It is useful in case action series (ex.: FS_RENAME->FS_CREATE)
+			if e.Proto.Action == proto.FS_NO_ACTION {
+				continue
+			}
+			//Notify clients about the Event
+			fmt.Println(e)
+			c.EventsChannel <- e.Proto
+			/*for _, c := range s.pool.pool {
+				if !c.syncActive || c.uid != e.FS.Owner {
+					continue
+				}
+				c.eventsChan <- e.Proto
+			}*/
+		case e := <-c.syncErrChan:
+			c.Logger.Error(fmt.Errorf("error in filesystem watcher: %w", e))
+		}
+	}
+}
+
+func (c *Client) processRoot() {
+	c.Logger.InfoGreen("Processing root directory")
+	rpStart := time.Now()
+	files, dirs, err, errs := c.fp.ProcessDirectory(c.Config.FileSystemRootPath)
+	if err != nil {
+		c.Logger.Error(fmt.Errorf("error processing directory: %w", err))
+	}
+	if len(errs) > 0 {
+		text := ""
+		for _, e := range errs {
+			text += e.Error() + "\n"
+		}
+		c.Logger.Warn("Errors in processing filesystem: \n" + text)
+	}
+	c.Logger.InfoGreen(fmt.Sprintf("Root directory processed. Total %d files in %d directories. Time: %v", files, dirs, time.Since(rpStart)))
+	c.Logger.InfoGreen("Starting server")
 }

@@ -1,7 +1,7 @@
 package proto
 
 import (
-	"github.com/lazycloud-app/go-filesync/ver"
+	"github.com/lazycloud-app/go-fsp-proto/ver"
 )
 
 var (

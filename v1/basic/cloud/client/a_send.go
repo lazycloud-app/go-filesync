@@ -9,10 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
+	"github.com/lazycloud-app/go-filesync/v1/basic/fs"
 	"github.com/lazycloud-app/go-filesync/v1/basic/imp"
 	"github.com/lazycloud-app/go-filesync/v1/basic/messenger"
 	"github.com/lazycloud-app/go-filesync/v1/basic/proto"
@@ -25,20 +24,18 @@ func (c *Client) Hello(conn *tls.Conn) error {
 	c.Logger.Info("Sending Hello")
 
 	payload := proto.Hello{
-		ConnectIntension:      proto.IntensionClient,
-		PartyName:             "test_client_1",
-		AppVersion:            c.AppVersion,
-		OwnerContacts:         "lazybark.dev@gmail.com",
-		MaxClients:            0,
-		MaxConnectionsPerUser: 15,
-		MaxFileSize:           2048,
+		ConnectIntension: proto.IntensionClient,
+		PartyName:        "test_client_1",
+		AppVersion:       c.AppVersion,
+		OwnerContacts:    "lazybark.dev@gmail.com",
+		MaxFileSize:      2048,
 	}
 
-	err := m.Send(payload, proto.MessageHello, conn)
+	err := m.SendMessage(payload, proto.MessageHello, conn)
 	if err != nil {
 		return fmt.Errorf("[Hello] error sending Hello: %w", err)
 	}
-	c.Stat.BytesSent += m.SentBytes()
+	c.Stat.BytesSent += m.SBytes()
 
 	// Wait for answer
 	for {
@@ -54,7 +51,7 @@ func (c *Client) Hello(conn *tls.Conn) error {
 		if err != nil {
 			return fmt.Errorf("[Hello] broken message from %v:%v -> %w", c.Config.ServerAddress, c.Config.ServerPort, err)
 		}
-		c.Stat.BytesRecieved += m.RecievedBytes()
+		c.Stat.BytesRecieved += m.RecBytes()
 
 		// The only suitable state is getting Handshake here
 		// Any other message type = error
@@ -92,14 +89,14 @@ func (c *Client) Auth(conn *tls.Conn) error {
 		Password:   c.Config.Password,
 		DeviceName: hostname,
 		Label:      "NO LABEL",
-		Session:    c.SessionKey,
+		SessionKey: c.SessionKey,
 	}
 
-	err = m.Send(payload, proto.MessageAuth, conn)
+	err = m.SendMessage(payload, proto.MessageAuth, conn)
 	if err != nil {
 		return fmt.Errorf("[Auth] error sending Auth: %w", err)
 	}
-	c.Stat.BytesSent += m.SentBytes()
+	c.Stat.BytesSent += m.SBytes()
 
 	// Wait for answer
 	retry := 0
@@ -119,7 +116,7 @@ func (c *Client) Auth(conn *tls.Conn) error {
 		if err != nil {
 			return fmt.Errorf("[Auth] broken message from %v:%v -> %w", c.Config.ServerAddress, c.Config.ServerPort, err)
 		}
-		c.Stat.BytesRecieved += m.RecievedBytes()
+		c.Stat.BytesRecieved += m.RecBytes()
 
 		// The only suitable state is getting Token here
 		// Any other message type = error
@@ -136,9 +133,9 @@ func (c *Client) Auth(conn *tls.Conn) error {
 			if !c.SyncActive {
 				c.SyncActive = true
 				c.FileGetter = make(chan proto.GetFile)
+				go c.RequestRoutine()
 			}
-			// Start routine that will make download requests
-			go c.RequestRoutine()
+
 			return nil
 		} else if rec.Type == proto.MessageError {
 			return fmt.Errorf("[Auth] %w", c.ProcessErrorPayload(rec.Payload))
@@ -153,16 +150,16 @@ func (c *Client) SyncStart(conn *tls.Conn) error {
 	m.SetToken(c.CurrentToken)
 	rec := m.Recieved()
 
-	payload := proto.StartSync{
+	payload := proto.SyncStart{
 		Type:     proto.SyncTypeFullSignal,
 		NotAfter: time.Now().Add(25 * time.Hour),
 	}
 
-	err := m.Send(payload, proto.MessageStartSync, conn)
+	err := m.SendMessage(payload, proto.MessageStartSync, conn)
 	if err != nil {
 		return fmt.Errorf("[SyncStart] error sending Start: %w", err)
 	}
-	c.Stat.BytesSent += m.SentBytes()
+	c.Stat.BytesSent += m.SBytes()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	netData, err := c.ReadStream(ctx, conn)
@@ -175,7 +172,7 @@ func (c *Client) SyncStart(conn *tls.Conn) error {
 	if err != nil {
 		return fmt.Errorf("[SyncStart] broken message from %v:%v -> %w", c.Config.ServerAddress, c.Config.ServerPort, err)
 	}
-	c.Stat.BytesRecieved += m.RecievedBytes()
+	c.Stat.BytesRecieved += m.RecBytes()
 
 	if rec.Type == proto.MessageOK {
 		fmt.Println("SYNC OK")
@@ -207,78 +204,28 @@ func (c *Client) SyncStart(conn *tls.Conn) error {
 				c.Logger.Error(fmt.Errorf("(%v)[ParseSyncEvent] broken payload: %w", conn.RemoteAddr(), err))
 				continue
 			}
-			fmt.Println("SYNC EVENT", event.Type.String())
 
-			// Process removing
-			if event.Type == proto.ObjectRemoved {
-				c.AddActionToBuffer(c.FW.UnEscapeAddress(filepath.Join(event.Path, event.Name)), fsnotify.Remove)
+			fmt.Println("SYNC EVENT", event.Action.String())
 
-				sResp := c.ProcessObjectRemoved(event)
-				if sResp.Err {
-					c.Logger.Error("[Active Sync] error -> ", err)
-					// Server doesn't need to know error description in case error is internal
-					if sResp.Type != proto.ErrInternal {
-						err = m.SendError(sResp.Type, sResp.Text.Error(), &conn)
-						if err != nil {
-							c.Logger.Error(fmt.Errorf("[Active Sync] error sending err: %s", err))
-							continue
-						}
-					} else {
-						err = m.SendError(sResp.Type, "", &conn)
-						if err != nil {
-							c.Logger.Error(fmt.Errorf("[Active Sync] error sending err: %s", err))
-							continue
-						}
-					}
-					c.Stat.BytesSent += m.SentBytes()
-				}
+			if fs.EventFromProto(event.Action) == fs.FS_UNKNOWN_ACTION {
+				c.Logger.Error("[Active Sync] server sent unexpected file action type: %s", event.Action)
 				continue
-			} else if event.Type == proto.ObjectCreated {
-				sResp := c.ProcessObjectCreated(event)
-				if sResp.Err {
-					c.Logger.Error("[Active Sync] error -> ", err)
-					// Server doesn't need to know error description in case error is internal
-					if sResp.Type != proto.ErrInternal {
-						err = m.SendError(sResp.Type, sResp.Text.Error(), &conn)
-						if err != nil {
-							c.Logger.Error(fmt.Errorf("[Active Sync] error sending err: %s", err))
-							continue
-						}
-					} else {
-						err = m.SendError(sResp.Type, "", &conn)
-						if err != nil {
-							c.Logger.Error(fmt.Errorf("[Active Sync] error sending err: %s", err))
-							continue
-						}
-					}
-					c.Stat.BytesSent += m.SentBytes()
-				}
+			} else if fs.EventFromProto(event.Action) == fs.FS_ANY_ACTION {
+				c.Logger.Error("[Active Sync] server wants to process 'ANY' action whic is not supported")
 				continue
-			} else if event.Type == proto.ObjectUpdated {
-				sResp := c.ProcessObjectUpdated(event)
-				if sResp.Err {
-					c.Logger.Error("[Active Sync] error -> ", err)
-					// Server doesn't need to know error description in case error is internal
-					if sResp.Type != proto.ErrInternal {
-						err = m.SendError(sResp.Type, sResp.Text.Error(), &conn)
-						if err != nil {
-							c.Logger.Error(fmt.Errorf("[Active Sync] error sending err: %s", err))
-							continue
-						}
-					} else {
-						err = m.SendError(sResp.Type, "", &conn)
-						if err != nil {
-							c.Logger.Error(fmt.Errorf("[Active Sync] error sending err: %s", err))
-							continue
-						}
-					}
-					c.Stat.BytesSent += m.SentBytes()
-				}
-				continue
-			} else {
-				c.Logger.Error("[Active Sync] server sent unexpected file action type: %s", event.Type)
+			} else if fs.EventFromProto(event.Action) == fs.FS_NO_ACTION {
 				continue
 			}
+
+			getFile, err := c.fp.FSEventProcessIncoming(event)
+			if err != nil {
+				c.Logger.Error(fmt.Errorf("(%v)[Active Sync] error in FSEventProcessIncoming: %w", conn.RemoteAddr(), err))
+				continue
+			}
+			if getFile.Name != "" {
+				c.FileGetter <- getFile
+			}
+			continue
 		} else if rec.Type == proto.MessageError {
 			//PARSE error AND print
 			//if it's deadly - exit
@@ -303,11 +250,39 @@ func (c *Client) SyncEnd(conn *tls.Conn) error {
 
 func (c *Client) RequestRoutine() {
 	fmt.Println("RequestRoutine started")
-	for fileToGet := range c.FileGetter {
-		fmt.Println("Getting", fileToGet.Name)
+	defer fmt.Println("RequestRoutine stopped")
 
-		c.FilesInRow = append(c.FilesInRow, fileToGet)
-		go c.GetFile(&fileToGet)
+	conn, err := c.InitTLSConnection()
+	if err != nil {
+		c.Logger.FatalBackRed("[GetFile] can not init connection -> %w", err)
 	}
-	fmt.Println("RequestRoutine stopped")
+	defer conn.Close()
+
+	m := messenger.New()
+	m.SetToken(c.CurrentToken)
+
+	err = c.Auth(conn)
+	if err != nil {
+		c.Logger.Error("[GetFile] auth error -> ", err)
+		return
+	}
+
+	for {
+		select {
+		case fileToGet := <-c.FileGetter:
+			fmt.Println("9999999999999999999999")
+			fmt.Println("Getting", fileToGet.Name)
+
+			c.FilesInRow = append(c.FilesInRow, fileToGet)
+			c.GetFile(&fileToGet, conn, m)
+		case e := <-c.EventsChannel:
+			fmt.Println("0000000000000000000000")
+			err := m.SendMessage(e, proto.MessageSyncEvent, conn)
+			if err != nil {
+				c.Logger.Error("[Sync Event] sending file request error -> ", err)
+				return
+			}
+		}
+	}
+
 }

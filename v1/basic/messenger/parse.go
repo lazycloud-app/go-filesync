@@ -8,6 +8,15 @@ import (
 	"github.com/lazycloud-app/go-filesync/v1/basic/proto"
 )
 
+type (
+	ParseError struct {
+		Err   bool
+		Type  proto.ErrorType
+		Text  string
+		Stage string
+	}
+)
+
 func (m *Messenger) ParseRecieved(bytes *[]byte) error {
 	m.brec += len(*bytes)
 	err := json.Unmarshal(*bytes, m.recieved)
@@ -40,8 +49,8 @@ func (m *Messenger) ParseGetFile() (getFile proto.GetFile, err error) {
 		return getFile, fmt.Errorf("[ParseGetFile] error unmarshalling -> %w", err)
 	}
 
-	if getFile.Name == "" {
-		err = fmt.Errorf("no name")
+	if getFile.Name == "" || getFile.Path == "" || getFile.Hash == "" {
+		err = fmt.Errorf("[ParseGetFile] empty name, path or hash found")
 		return
 	}
 	return

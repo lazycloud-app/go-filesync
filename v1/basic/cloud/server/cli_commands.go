@@ -18,14 +18,14 @@ func (s *Server) PrintVersion() string {
 
 	modules := "Modules:"
 
-	return fmt.Sprintf("LazyCloud %s v%s (%s)\n%s", s.appLevel, s.appVersion, s.appVersionLabel, modules)
+	return fmt.Sprintf("LazyCloud %s v%s (%s)\n%s", s.sData.appLevel, s.sData.appVersion, s.sData.appVersionLabel, modules)
 }
 
 func (s *Server) PrintStatistics() string {
 
 	modules := "Modules:"
 
-	return fmt.Sprintf("LazyCloud %s v%s (%s)\n%s", s.appLevel, s.appVersion, s.appVersionLabel, modules)
+	return fmt.Sprintf("LazyCloud %s v%s (%s)\n%s", s.sData.appLevel, s.sData.appVersion, s.sData.appVersionLabel, modules)
 }
 
 func ReturnOnline(b bool) string {

@@ -13,13 +13,18 @@ var (
 
 type (
 	Messenger struct {
-		ver        int
-		verComment string
-		token      string
-		send       *proto.Message // Message to send
-		recieved   *proto.Message // Message recieved
-		bsent      int
-		brec       int
+		ver              int
+		verComment       string
+		token            string
+		send             *proto.Message // Message to send
+		recieved         *proto.Message // Message recieved
+		Err              *ParseError
+		bsent            int
+		brec             int
+		recievedMessages int
+		sentMessages     int
+		clientErrors     int
+		serverErrors     int
 	}
 )
 
@@ -49,10 +54,31 @@ func (m *Messenger) Recieved() *proto.Message {
 	return m.recieved
 }
 
-func (m *Messenger) SentBytes() int {
+func (m *Messenger) SBytes() int {
 	return m.bsent
 }
 
-func (m *Messenger) RecievedBytes() int {
+func (m *Messenger) RecBytes() int {
 	return m.brec
+}
+
+func (m *Messenger) ClientErrors() int {
+	return m.clientErrors
+}
+
+func (m *Messenger) ServerErrors() int {
+	return m.serverErrors
+}
+
+func (m *Messenger) AddClientErrors(n int) {
+	m.clientErrors += n
+}
+
+func (m *Messenger) AddServerErrors(n int) {
+	m.serverErrors += n
+}
+
+// Returns a copy of Err
+func (m *Messenger) ParseError() ParseError {
+	return *m.Err
 }

@@ -26,10 +26,10 @@ type (
 		Password   string
 		DeviceName string
 		Label      string
-		Session    string
+		SessionKey string
 	}
 
-	StartSync struct {
+	SyncStart struct {
 		Type     SyncType
 		NotAfter time.Time
 		Objects  []string // Only for SyncTypes that include specific files or folders

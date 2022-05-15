@@ -21,17 +21,18 @@ func SyncEventFromWatcherEvent(watcherEvent fsnotify.Op) proto.SyncEventType {
 	return proto.SyncEventIllegal
 }
 
-func ParseSyncEvent(raw []byte) (p proto.SyncEvent, err error) {
+func ParseSyncEvent(raw []byte) (p proto.FSEvent, err error) {
 	err = json.Unmarshal(raw, &p)
 	if err != nil {
 		return p, fmt.Errorf("[ParseSyncEvent] error unmarshalling -> %w", err)
 	}
-	if p.Name == "" {
+	fmt.Println(p)
+	if p.Object.FullPath == "" {
 		err = fmt.Errorf("no object found")
 		return
 	}
 
-	if !p.CheckType() {
+	/*if !p.CheckType() {
 		err = fmt.Errorf("unknown event type")
 		return
 	}
@@ -39,6 +40,6 @@ func ParseSyncEvent(raw []byte) (p proto.SyncEvent, err error) {
 	if !p.CheckObject() {
 		err = fmt.Errorf("unknown object type")
 		return
-	}
+	}*/
 	return
 }

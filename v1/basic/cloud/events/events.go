@@ -31,21 +31,21 @@ type (
 
 	EventProcessor interface {
 		// Send message that should be processed at any circumstances
-		Send(Level, string, interface{})
+		SendEvent(Level, string, interface{})
 		// Send message that should be ignored in case verbosity is set to false
-		SendVerbose(Level, string, interface{})
+		SendEventVerbose(Level, string, interface{})
 		// Signal EventProcessor that there will be no events anymore
 		Close()
 	}
 )
 
 // SendVerbose sends message marked as non-verbose that will be treated accordingly to IsVerbose property of the Processor
-func (p *Processor) Send(l Level, es string, data interface{}) {
+func (p *Processor) SendEvent(l Level, es string, data interface{}) {
 	p.ec <- Event{Level: l, Source: es, Verbose: false, Data: data}
 }
 
 // SendVerbose sends message marked as verbose that will be treated accordingly to IsVerbose property of the Processor
-func (p *Processor) SendVerbose(l Level, es string, data interface{}) {
+func (p *Processor) SendEventVerbose(l Level, es string, data interface{}) {
 	p.ec <- Event{Level: l, Source: es, Verbose: true, Data: data}
 }
 

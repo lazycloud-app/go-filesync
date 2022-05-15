@@ -1,6 +1,6 @@
 package proto
 
-import "github.com/lazycloud-app/go-filesync/ver"
+import "github.com/lazycloud-app/go-fsp-proto/ver"
 
 type (
 	// Intension signals the purpose of the connection that yet to be made
@@ -10,16 +10,12 @@ type (
 	//
 	// It has all the fields that server may use to determine whether the client suits server's demands
 	Hello struct {
-		ConnectIntension      Intension
-		PartyName             string
-		AppVersion            ver.AppVersion
-		OwnerContacts         string
-		MaxClients            int
-		MaxConnectionsPerUser int
-		MaxSessionsPerUser    int // Session basically means device
-		MaxFileSize           int
-		MaxFiles              int
-		MaxFilesPerUser       int
+		ConnectIntension Intension
+		PartyName        string
+		AppVersion       ver.AppVersion
+		OwnerContacts    string
+		MaxFileSize      int
+		MaxFiles         int
 	}
 
 	// Handshake signals the client to pass on authorization information and tells sever's rules
@@ -30,6 +26,7 @@ type (
 		AdditionalServerRules []string
 		MaxClients            int
 		MaxConnectionsPerUser int
+		MaxClientsPerUser     int
 		MaxFileSize           int
 		MaxFiles              int
 		MaxFilesPerUser       int
@@ -40,6 +37,7 @@ type (
 const (
 	intensions_start Intension = iota
 
+	IntensionServer
 	IntensionClient
 	IntensionMirror
 
@@ -59,5 +57,5 @@ func (i Intension) String() string {
 	if !i.Check() {
 		return "Unknown Intension"
 	}
-	return [...]string{"Unknown Intension", "Client", "Mirror server", "Unknown Intension", "Unknown Intension"}[i]
+	return [...]string{"Unknown Intension", "Server", "Client", "Mirror server", "Unknown Intension", "Unknown Intension"}[i]
 }

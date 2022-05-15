@@ -1,4 +1,4 @@
-package cloud
+package helpers
 
 import (
 	"log"
@@ -9,7 +9,6 @@ import (
 	gLogger "gorm.io/gorm/logger"
 )
 
-// OpenSQLite opens or creates a SQLite file
 func OpenSQLite(dbName string) (db *gorm.DB, err error) {
 	db, err = gorm.Open(sqlite.Open(dbName), &gorm.Config{Logger: gLogger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
