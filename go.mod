@@ -2,11 +2,14 @@ module github.com/lazycloud-app/go-filesync
 
 go 1.18
 
+replace github.com/lazycloud-app/go-fsp-proto => ../go-fsp-proto
+
 require (
 	github.com/fsnotify/fsnotify v1.5.4
 	github.com/gofrs/uuid v4.2.0+incompatible
 	github.com/lazybark/go-helpers v0.0.0-20220429141739-bf825a9d9e3f
 	github.com/lazybark/go-pretty-code v0.0.0-20220421203115-33d59b8d3f0e
+	github.com/lazycloud-app/go-fsp-proto v0.0.0-00010101000000-000000000000
 	github.com/spf13/viper v1.11.0
 	go.uber.org/zap v1.21.0
 	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4
