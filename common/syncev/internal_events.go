@@ -7,16 +7,20 @@ package syncev
 //Better to wrap builtin error instead.
 type IE struct {
 	Text     string
-	IsErr    bool
-	EvSource EvSource //One ofre-defined sources to log/treat error correctly
-	Log      bool     //Error should be logged
-	Level    EvLevel  //Errors are treated accordingly to that level
+	EvSource EvSource //One pre-defined sources to log/treat error correctly
+	Log      bool     //Event should be logged
+	Level    EvLevel  //Events are treated accordingly to that level
 }
 
+//IsError returns true if event has Level that should be treated as error
 func (ie IE) IsError() bool {
-	return ie.IsErr
+	if ie.Level >= EvLevelError && ie.Level < EvLevelIllegal {
+		return true
+	}
+	return false
 }
 
+//Error makes it possible to return IE as error
 func (ie IE) Error() string {
 	return ie.Text
 }
@@ -57,6 +61,7 @@ const (
 
 	EvLevelInfo
 	EvLevelWarning
+
 	EvLevelError
 	EvLevelCritical
 	EvLevelFatal
