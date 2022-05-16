@@ -26,6 +26,13 @@ var Delim = p.Delim
 //RootPointer is the text representation of root path in FS-safe way
 var RootPointer = p.RootPointer
 
+//CheckEscaped returns true if finds Delim or RootPointer in provided path
 func CheckEscaped(path string) bool {
-	return strings.Contains(path, Delim)
+	if strings.Contains(path, Delim) {
+		return true
+	}
+	if strings.Contains(path, RootPointer) {
+		return true
+	}
+	return false
 }
