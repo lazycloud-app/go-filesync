@@ -29,10 +29,6 @@ func (ie IE) Source() string {
 	return ie.EvSource.String()
 }
 
-func (ie *IE) NoLog() {
-	ie.Log = false
-}
-
 //EvSource represents possible error sources to help debugging the app
 type EvSource int
 
