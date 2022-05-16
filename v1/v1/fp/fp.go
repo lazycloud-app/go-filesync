@@ -20,3 +20,7 @@ type FileProcessor interface {
 //Its use will reduce number of pissble delimeters to check in path and it does not need any escape in strings.
 //So conversion becomes very simple by replacing 'X' to '>' to 'Y'
 var Delim = ">"
+
+func CheckEscaped(path string) bool {
+	return strings.Contains(path, Delim)
+}
