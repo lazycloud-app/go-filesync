@@ -1,18 +1,18 @@
 package syncev
 
 //New returns asserts error source and level, then calls to NewErr
-func New(e error, s string, l bool, lev string) IE {
+func New(t string, s string, l bool, e bool, lev string) IE {
 	source := AssetSource(s)
 	level := AssetLevel(lev)
 
-	return NewErr(e, source, l, level)
+	return NewEv(t, source, l, e, level)
 }
 
-//NewErr returns new IE object marked as error
-func NewErr(e error, s EvSource, l bool, lev EvLevel) IE {
+//NewEv returns new IE object marked as error
+func NewEv(t string, s EvSource, l bool, e bool, lev EvLevel) IE {
 	return IE{
-		Err:      e,
-		IsErr:    true,
+		Text:     t,
+		IsErr:    e,
 		EvSource: s,
 		Log:      l,
 		Level:    lev,

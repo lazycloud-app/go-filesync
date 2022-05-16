@@ -6,7 +6,7 @@ package syncev
 //
 //Better to wrap builtin error instead.
 type IE struct {
-	Err      error
+	Text     string
 	IsErr    bool
 	EvSource EvSource //One ofre-defined sources to log/treat error correctly
 	Log      bool     //Error should be logged
@@ -18,7 +18,7 @@ func (ie IE) IsError() bool {
 }
 
 func (ie IE) Error() string {
-	return ie.Err.Error()
+	return ie.Text
 }
 
 func (ie IE) Source() string {
