@@ -15,6 +15,10 @@ type FileProcessor interface {
 	//
 	//It returns number of directories and files into processed path.
 	ProcessDirectoryToDB(string) (int, int, error)
+	//WatchRoot sets FileProcessor internal watcher to monitor its root directory for any filesystem changes
+	WatchRoot()
+	//Watch sets FileProcessor internal watcher to monitor specified directory for any filesystem changes
+	Watch(string)
 }
 
 //Delim is the FS-safe delimeter that should replace any other delimeter before sending filepath to any peer.
